@@ -14,10 +14,10 @@
 
 - [x] Multi-threading with java threads
 - [x] Server list ping
+- [x] Login
 
 ## Soon to be Implamented Features:
 
-- [ ] Login
 - [ ] Encryption
 
 ## Not Implamented Features:
