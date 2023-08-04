@@ -1,39 +1,39 @@
 package systems.btx.Classes;
 
 import com.google.gson.Gson;
-import com.google.gson.JsonElement;
-import com.google.gson.JsonObject;
-import systems.btx.PacketHandlers.HandShake;
-import systems.btx.PacketHandlers.LoginStart;
+import com.sun.tools.jconsole.JConsoleContext;
 import systems.btx.Packets.*;
 
+import java.io.ByteArrayInputStream;
 import java.io.DataInputStream;
 import java.io.DataOutputStream;
+import java.io.IOException;
 import java.net.Socket;
+import java.util.ArrayList;
 import java.util.UUID;
 
+import static java.lang.String.format;
 import static systems.btx.Constants.*;
 import static systems.btx.Parsers.Numbers.createVarInt;
-import static systems.btx.Parsers.Numbers.getVarIntLength;
+import static systems.btx.Parsers.Numbers.readVarInt;
 import static systems.btx.Parsers.Packet.parsePacketHeaders;
 
-public class ClientHandler implements Runnable {
+public class Client implements Runnable {
+    public Ticker ticker;
+    private Server server;
     private Socket clientSocket;
-    public Client client;
-    private String state = "HANDSHAKE";
-
-    private String StatusResponse;
-
+    public String state = "HANDSHAKE";
     private Gson gson = new Gson();
-    private String serverAddress;
-    private int serverPort;
-    private String nextState = "HANDSHAKE";
-    private String name;
-    private UUID uuid;
+    public String serverAddress;
+    public int serverPort;
+    public Player player;
+    private PacketProcesser packetProcesser;
+    public DataOutputStream outputStream;
 
-    public ClientHandler(Socket clientSocket) {
+    public Client(Socket clientSocket, Ticker ticker, Server server) {
         this.clientSocket = clientSocket;
-        this.client = new Client();
+        this.ticker = ticker;
+        this.server = server;
     }
 
     @Override
@@ -42,128 +42,121 @@ public class ClientHandler implements Runnable {
             DataInputStream inputStream = new DataInputStream(clientSocket.getInputStream());
             DataOutputStream outputStream = new DataOutputStream(clientSocket.getOutputStream());
 
+            packetProcesser = new PacketProcesser(server, this, outputStream);
+
             while (!clientSocket.isClosed()) {
                 // Read packet type
-                int[] packetHeaders = parsePacketHeaders(inputStream);
-                int packetID = packetHeaders[1];
-                int packetLength = packetHeaders[0];
+                int packetLength = readVarInt(inputStream);
 
-                System.out.println(packetID);
+                DataInputStream data = new DataInputStream(new ByteArrayInputStream(inputStream.readNBytes(packetLength)));
+
+                int packetID = readVarInt(data);
+
+                byte[] packetData = data.readAllBytes();
+
+                Packet packet = new Packet(packetLength, packetID, packetData);
+
+                packetProcesser.addPacket(packet);
+
+                ticker.add(o -> {
+                    packetProcesser.process();
+                    return o;
+                });
+
+                /*System.out.println(packetID);
                 switch (packetID) {
-                    case PACKET_HANDSHAKE: // this is used for other things too
-                        if (nextState.equals("HANDSHAKE")) {
-//                            String res = HandShake.handle(packetHeaders, PROTOCOL_VERSION, inputStream, outputStream);
-//
-//                            if (res.equals("LOGIN")) {
-//                                state = "LOGIN";
-//                            } else if (res.equals("STATUS")) {
-//                                new StatusResponsePacket(outputStream, "{\n" +
-//                                        "    \"version\": {\n" +
-//                                        "        \"name\": \"1.20.1\",\n" +
-//                                        "        \"protocol\": 763\n" +
-//                                        "    },\n" +
-//                                        "    \"players\": {\n" +
-//                                        "        \"max\": 100,\n" +
-//                                        "        \"online\": 5,\n" +
-//                                        "        \"sample\": [\n" +
-//                                        "            {\n" +
-//                                        "                \"name\": \"thinkofdeath\",\n" +
-//                                        "                \"id\": \"4566e69f-c907-48ee-8d71-d7ba5aa00d20\"\n" +
-//                                        "            }\n" +
-//                                        "        ]\n" +
-//                                        "    },\n" +
-//                                        "    \"description\": {\n" +
-//                                        "        \"text\": \"Hello world\"\n" +
-//                                        "    },\n" +
-//                                        "    \"favicon\": \"\",\n" +
-//                                        "    \"enforcesSecureChat\": true,\n" +
-//                                        "    \"previewsChat\": true\n" +
-//                                        "}\n").send();
-//
-//                                state = "STATUS";
-//                            }
+                    case 0x00:
+                       if (state.equals("HANDSHAKE")) {
+                           HandShakePacket handShakePacket = HandShakePacket.fromBytes(inputStream);
 
-                            HandShakePacket handShakePacket = HandShakePacket.fromBytes(inputStream);
+                           serverAddress = handShakePacket.getServerAddress();
+                           serverPort = handShakePacket.getServerPort();
+                           state = handShakePacket.getNextState();
+                       } else if (state.equals("LOGIN")) {
+                           LoginStartPacket loginStartPacket = LoginStartPacket.fromBytes(inputStream);
 
-                            serverAddress = handShakePacket.getServerAddress();
-                            serverPort = handShakePacket.getServerPort();
-                            nextState = handShakePacket.getNextState();
+                           username = loginStartPacket.getName();
+                           uuid = loginStartPacket.getPlayerUUID();
+                           ticker.add(o -> {
+                               LoginSuccessPacket loginSuccessPacket = new LoginSuccessPacket(uuid, username);
 
-                            if (nextState.equals("LOGIN")) {
-//                                String reason = "{\"text\":\"Not\"}";
-//
-//                                DisconnectPacket disconnectPacket = new DisconnectPacket(reason);
-//
-//                                byte[] packetBytes = disconnectPacket.toBytes();
-//
-//                                outputStream.write(packetBytes);
+                               try {
+                                   byte[] packetBytes = loginSuccessPacket.toBytes();
+                                   outputStream.write(packetBytes);
+                               } catch (Exception e) {
+                                   e.printStackTrace();
+                               }
+                               return o;
+                           });
+
+                            state = "PLAY";
+                       } else if (state.equals("STATUS")) {
+                           ticker.add(o -> {
+                               String response = "{\n" +
+                                       "    \"version\": {\n" +
+                                       "        \"name\": \"1.20.1\",\n" +
+                                       "        \"protocol\": 763\n" +
+                                       "    },\n" +
+                                       "    \"players\": {\n" +
+                                       format("        \"max\": %d,\n", server.maxPlayers) +
+                                       format("        \"online\": %d,\n", server.playerCount) +
+                                       "        \"sample\": []" +
+                                       "    },\n" +
+                                       "    \"description\": {\n" +
+                                       format("        \"text\": \"%s\"\n", server.motd) +
+                                       "    },\n" +
+                                       "    \"favicon\": \"data:image/png;base64,balls\",\n" +
+                                       "    \"enforcesSecureChat\": true,\n" +
+                                       "    \"previewsChat\": true\n" +
+                                       "}";
+
+                               StatusResponsePacket statusResponsePacket = new StatusResponsePacket(response);
+
+                               try {
+                                   byte[] packetBytes = statusResponsePacket.toBytes();
+
+                                   outputStream.write(packetBytes);
+                               } catch (IOException e) {
+                                   throw new RuntimeException(e);
+                               }
+                               return o;
+                           });
+                       } else if (state.equals("PLAY")) {
+                           if (isBundling) {
+                               isBundling = false;
+                               
+                               bundle.clear();
+                           } else {
+                               isBundling = true;
+                           }
 
 
-                            }
-                        } else if (nextState.equals("LOGIN")) {
-                            LoginStartPacket loginStartPacket = LoginStartPacket.fromBytes(inputStream);
-
-                            name = loginStartPacket.getName();
-                            uuid = loginStartPacket.getPlayerUUID();
-
-                            LoginSuccessPacket loginSuccessPacket = new LoginSuccessPacket(uuid, name);
-
-                            byte[] packetBytes = loginSuccessPacket.toBytes();
-
-                            outputStream.write(packetBytes);
-                        } else if (nextState.equals("STATUS")) {
-                            String response = "{\n" +
-                                    "    \"version\": {\n" +
-                                    "        \"name\": \"1.20.1\",\n" +
-                                    "        \"protocol\": 763\n" +
-                                    "    },\n" +
-                                    "    \"players\": {\n" +
-                                    "        \"max\": 420,\n" +
-                                    "        \"online\": 69,\n" +
-                                    "        \"sample\": [\n" +
-                                    "            {\n" +
-                                    "                \"name\": \"thinkofdeath\",\n" +
-                                    "                \"id\": \"4566e69f-c907-48ee-8d71-d7ba5aa00d20\"\n" +
-                                    "            }\n" +
-                                    "        ]\n" +
-                                    "    },\n" +
-                                    "    \"description\": {\n" +
-                                    "        \"text\": \"Hello world\"\n" +
-                                    "    },\n" +
-                                    "    \"favicon\": \"data:image/png;base64,balls\",\n" +
-                                    "    \"enforcesSecureChat\": true,\n" +
-                                    "    \"previewsChat\": true\n" +
-                                    "}";
-
-                            StatusResponsePacket statusResponsePacket = new StatusResponsePacket(response);
-
-                            byte[] packetBytes = statusResponsePacket.toBytes();
-
-                            outputStream.write(packetBytes);
-                        }
+                       }
                         break;
                     case 0x01: {
-                        PingRequestPacket pingRequestPacket = PingRequestPacket.fromBytes(inputStream);
+                        if (state.equals("STATUS")) {
+                            PingRequestPacket pingRequestPacket = PingRequestPacket.fromBytes(inputStream);
 
-                        PongResponsePacket pongResponsePacket = new PongResponsePacket(pingRequestPacket.getPayload());
+                            PongResponsePacket pongResponsePacket = new PongResponsePacket(pingRequestPacket.getPayload());
 
-                        byte[] packetBytes = pongResponsePacket.toBytes();
+                            byte[] packetBytes = pongResponsePacket.toBytes();
 
-                        outputStream.write(packetBytes);
+                            outputStream.write(packetBytes);
 
-                        break;
+                            break;
+                        }
                     }
                     default:
                         System.out.println("Received unknown packet type");
                         break;
-                }
+                }*/
             }
 
             // Close the streams and socket
             inputStream.close();
             outputStream.close();
             clientSocket.close();
-        } catch (Exception e) {
+        } catch (IOException e) {
             e.printStackTrace();
         }
     }

@@ -1,5 +1,6 @@
 package systems.btx.Packets;
 
+import java.io.ByteArrayInputStream;
 import java.io.DataInputStream;
 import java.io.IOException;
 import java.util.UUID;
@@ -18,8 +19,8 @@ public class LoginStartPacket {
         this.playerUUID = playerUUID;
     }
 
-    public static LoginStartPacket fromBytes(DataInputStream inputStream) throws IOException {
-        DataInputStream dataIn = inputStream;
+    public static LoginStartPacket fromBytes(byte[] data) throws IOException {
+        DataInputStream dataIn = new DataInputStream(new ByteArrayInputStream(data));
 
         String name = readString(dataIn);
 

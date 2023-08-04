@@ -43,8 +43,8 @@ public class HandShakePacket {
         return fullByteOut.toByteArray();
     }
 
-    public static HandShakePacket fromBytes(DataInputStream inputStream) throws IOException {
-        DataInputStream dataIn = inputStream;
+    public static HandShakePacket fromBytes(byte[] data) throws IOException {
+        DataInputStream dataIn = new DataInputStream(new ByteArrayInputStream(data));
 
         // Read Data (protocolVersion, serverAddress, serverPort, nextState)
         int protocolVersion = readVarInt(dataIn);

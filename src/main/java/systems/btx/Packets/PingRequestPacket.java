@@ -1,5 +1,6 @@
 package systems.btx.Packets;
 
+import java.io.ByteArrayInputStream;
 import java.io.DataInputStream;
 import java.io.IOException;
 
@@ -10,8 +11,8 @@ public class PingRequestPacket {
         this.payload = payload;
     }
 
-    public static PingRequestPacket fromBytes(DataInputStream inputStream) throws IOException {
-        DataInputStream dataIn = inputStream;
+    public static PingRequestPacket fromBytes(byte[] data) throws IOException {
+        DataInputStream dataIn = new DataInputStream(new ByteArrayInputStream(data));
 
         long payload = dataIn.readLong();
 
